@@ -34,7 +34,7 @@ def log(msg, err=False):
         return
     out = sys.stderr if err else sys.stdout
     out.write(str(msg))
-    out.write('\n')
+    out.write("\n")
 
 
 def error(msg):
@@ -43,21 +43,25 @@ def error(msg):
 
 
 def get_info(path):
-    glob_path = os.path.join(path, "goggame-*.info")
+    print("getting info")
+    # glob_path = os.path.join(path, "goggame-*.info")
+
+    # for mac os
+    glob_path = os.path.join(path, "Contents/Resources/goggame-*.info")
+    print("glob_path", glob_path)
     files = glob.glob(glob_path)
     if not files:
         error(f'Failed to find info file "{glob_path}".')
     with open(files[0]) as f:
         info = json.load(f)
     if "buildId" not in info:
-        glob_path = os.path.join(path, "goggame-*.id")
+        glob_path = os.path.join(path, "Contents/Resources/goggame-*.id")
         files = glob.glob(glob_path)
         if not files:
             error(f'Failed to find id file "{glob_path}".')
         with open(files[0]) as f:
             info["buildId"] = json.load(f)["buildId"]
     return info
-
 
 
 def compute_md5(path, chunk_size=4096):
@@ -72,9 +76,9 @@ def download_json(url, use_zlib=False):
     try:
         response = urllib.request.urlopen(url)
     except urllib.error.HTTPError as e:
-        error(f'Failed to retrieve URL {url}\nReason: {e.reason}\nCode: {e.code}')
+        error(f"Failed to retrieve URL {url}\nReason: {e.reason}\nCode: {e.code}")
     except urllib.error.URLError as e:
-        error(f'Failed to retrieve URL {url}\nReason: {e.reason}')
+        error(f"Failed to retrieve URL {url}\nReason: {e.reason}")
 
     data = response.read()
     if use_zlib:
@@ -86,7 +90,11 @@ FileInfo = namedtuple("FileInfo", ("path", "md5", "is_dir"))
 
 
 def get_files(game_id, build_id, os, language):
-    builds = download_json(f"https://content-system.gog.com/products/{game_id}/os/{os}/builds?generation=2")
+    builds = download_json(
+        f"https://content-system.gog.com/products/{game_id}/os/{os}/builds?generation=2"
+    )
+    # print(json.dumps(builds, indent=2))
+
     for build in builds["items"]:
         if build["build_id"] == build_id:
             break
@@ -95,15 +103,33 @@ def get_files(game_id, build_id, os, language):
 
     link = build["link"]
     content = download_json(link, use_zlib=True)
+    # print(json.dumps(content, indent=2))
+    # return
     files = []
     for depot in content["depots"]:
-        if not (language == "*" or language in depot["languages"] or "*" in depot["languages"]):
+        if not (
+            language == "*"
+            or language in depot["languages"]
+            or "*" in depot["languages"]
+        ):
             continue
 
         manifest = depot["manifest"]
-        depot_files = download_json(f"https://cdn.gog.com/content-system/v2/meta/{manifest[:2]}/{manifest[2:4]}/{manifest}", use_zlib=True)
+        depot_files = download_json(
+            f"https://cdn.gog.com/content-system/v2/meta/{manifest[:2]}/{manifest[2:4]}/{manifest}",
+            use_zlib=True,
+        )
+        # print(json.dumps(depot_files, indent=2))
+        # continue
         for item in depot_files["depot"]["items"]:
-            path = str(Path({"windows": PureWindowsPath, "osx": PurePosixPath}[os](item["path"])))
+            # Convert path to use forward slashes regardless of OS
+            path = str(
+                Path(
+                    {"windows": PureWindowsPath, "osx": PurePosixPath}[os](item["path"])
+                ).as_posix()
+            )
+            # Ensure consistent path separators
+            path = path.replace("\\", "/")
             if item["type"] == "DepotDirectory":
                 files.append(FileInfo(path, None, True))
             else:
@@ -126,16 +152,31 @@ def files_in_dir(path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Verify the installation of a game from GOG against the official MD5 hashes.")
-    parser.add_argument("path", help="Directory where the game is installed", nargs="?")
-    parser.add_argument("-q", "--quiet", default=False, action="store_true",
-                        help="Suppress all output")
-    parser.add_argument("-o", "--os", choices=("windows", "osx"), default="windows",
-                        help="OS of the game installation")
-    parser.add_argument("-l", "--language", default="en-US",
-                        help="Language of the game installation")
-    parser.add_argument("--dump-md5sums", nargs=2, metavar=("GAME_ID", "BUILD_ID"),
-                        help="Dump all md5 checksums for a given gameID and buildID to stdout (md5sum format)")
+    parser = argparse.ArgumentParser(
+        description="Verify the installation of a game from GOG against the official MD5 hashes."
+    )
+    parser.add_argument(
+        "--path", help="Directory where the game is installed", nargs="?"
+    )
+    parser.add_argument(
+        "-q", "--quiet", default=False, action="store_true", help="Suppress all output"
+    )
+    parser.add_argument(
+        "-o",
+        "--os",
+        choices=("windows", "osx"),
+        default="osx",
+        help="OS of the game installation",
+    )
+    parser.add_argument(
+        "-l", "--language", default="en-US", help="Language of the game installation"
+    )
+    parser.add_argument(
+        "--dump-md5sums",
+        nargs=2,
+        metavar=("GAME_ID", "BUILD_ID"),
+        help="Dump all md5 checksums for a given gameID and buildID to stdout (md5sum format)",
+    )
     global args
     args = parser.parse_args()
 
@@ -145,10 +186,11 @@ def main():
         if not args.path:
             parser.error("the following arguments are required: path")
         info = get_info(args.path)
-        log(f"# Name: {info['name']}\n# Game ID: {info['gameId']}\n# Build ID: {info['buildId']}")
+        log(
+            f"# Name: {info['name']}\n# Game ID: {info['gameId']}\n# Build ID: {info['buildId']}"
+        )
+        print("info: ", info)
 
-    # game_id = "1207664643"
-    # build_id = "51727259307363981"
     files = get_files(info["gameId"], info["buildId"], args.os, args.language)
 
     if args.dump_md5sums:
@@ -159,13 +201,14 @@ def main():
 
     file_paths = {file.path for file in files}
     printed_unexpected = False
+
+    print("file_paths:", file_paths)
     for file in files_in_dir(args.path):
         if file not in file_paths:
             if not printed_unexpected:
                 log("\n# Unexpected files:")
                 printed_unexpected = True
             log(file)
-    
     log("\n# Expected files:")
     errors = []
     for file in files:
@@ -187,7 +230,7 @@ def main():
                         msg = f"MD5 mismatch ({md5})"
         if msg != "OK":
             errors.append((file.path, msg))
-        
+
         log(f"{file.path} ({description}): {msg}")
 
     if errors:
@@ -197,5 +240,5 @@ def main():
         exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
